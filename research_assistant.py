@@ -1,6 +1,5 @@
 """
 Advanced Research Assistant using LangGraph with custom state, memory, and human-in-the-loop.
-Contains deliberate bugs to test LangGraph API knowledge.
 """
 
 import os
@@ -20,7 +19,6 @@ load_dotenv()
 
 # Custom state with research tracking
 class ResearchState(TypedDict):
-    # BUG 1: Wrong annotation for messages - should be Annotated[list, add_messages]
     messages: Annotated[List[BaseMessage], add_messages]
     
     # Custom state fields for research tracking
@@ -30,8 +28,6 @@ class ResearchState(TypedDict):
     requires_approval: bool
     approved_by_human: bool
     
-    # BUG 2: Missing operator for custom state fields
-    # Should use Annotated with proper operators for list fields
     summary: str
 
 # Research tools
@@ -85,7 +81,6 @@ model = ChatAnthropic(
 
 tools = [web_search, document_lookup, calculate_stats, request_human_approval]
 
-# BUG 3: Wrong method name - should be bind_tools (not bind_tool)
 model_with_tools = model.bind_tool(tools)
 
 def research_agent(state: ResearchState):
@@ -116,14 +111,11 @@ def research_agent(state: ResearchState):
 
 def execute_tools(state: ResearchState):
     """Execute tools and update research state."""
-    # BUG 4: Wrong ToolNode instantiation - should pass tools directly, not as tools_list
     tool_node = ToolNode(tools_list=tools)
     
     # Execute tools
     result = tool_node.invoke(state)
     
-    # BUG 5: Incorrect state update - not handling tool results properly
-    # Should extract sources and update state fields
     last_message = result["messages"][-1]
     
     return {
@@ -136,7 +128,6 @@ def check_approval_needed(state: ResearchState) -> bool:
     """Check if human approval is needed based on tool calls."""
     last_message = state["messages"][-1]
     
-    # BUG 6: Wrong attribute name - should be tool_calls not tools_called
     if hasattr(last_message, 'tools_called'):
         for tool_call in last_message.tools_called:
             if tool_call.get("name") == "request_human_approval":
@@ -149,7 +140,6 @@ def request_approval(state: ResearchState):
         content="I need human approval to proceed with this research topic. Please review and approve."
     )
     
-    # BUG 7: Wrong way to interrupt - should use interrupt() function correctly
     NodeInterrupt("Human approval required")
     
     return {
@@ -162,7 +152,6 @@ def route_after_agent(state: ResearchState) -> Literal["tools", "approval", "sum
     last_message = state["messages"][-1]
     
     # Check for tool calls
-    # BUG 8: Wrong tool_calls attribute name
     if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
         # Check if approval is needed
         if check_approval_needed(state):
@@ -194,7 +183,6 @@ def summarize_research(state: ResearchState):
         "summary": summary_response.content
     }
 
-# BUG 9: Wrong graph class - should be StateGraph not WorkflowGraph
 workflow = WorkflowGraph(ResearchState)
 
 # Add nodes
@@ -206,7 +194,6 @@ workflow.add_node("summarize", summarize_research)
 # Add edges
 workflow.add_edge(START, "agent")
 
-# BUG 10: Wrong conditional edge setup - missing proper routing
 workflow.add_conditional_edge(
     "agent",
     route_after_agent,
@@ -220,16 +207,11 @@ workflow.add_conditional_edge(
 
 # Add edges back to agent
 workflow.add_edge("tools", "agent")
-# BUG 11: Missing edge from approval back to agent
-# Should have: workflow.add_edge("approval", "agent")
-
 workflow.add_edge("summarize", END)
 
 # Setup memory with SQLite
-# BUG 12: Wrong parameter name - should be conn_string not db_path
 checkpointer = SqliteSaver.from_conn_string(db_path="research_memory.db")
 
-# BUG 13: Wrong compilation method - should be compile() not build()
 app = workflow.build(checkpointer=checkpointer)
 
 def main():
@@ -249,11 +231,9 @@ def main():
             
         if user_input.lower() == 'approve':
             print("✅ Approval granted - continuing research...")
-            # BUG 14: Wrong resume mechanism
             app.update_state(thread_config, {"approved_by_human": True})
             continue
         
-        # BUG 15: Wrong message type for user input - should be HumanMessage
         user_message = AIMessage(content=user_input)
         
         initial_state = {
@@ -267,7 +247,6 @@ def main():
         }
         
         try:
-            # BUG 16: Wrong config parameter name - should be config not thread_config
             for event in app.stream(initial_state, thread_config=thread_config):
                 for node, value in event.items():
                     if "messages" in value and value["messages"]:
