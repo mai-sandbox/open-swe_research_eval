@@ -1,0 +1,6 @@
+venv/
+
+.env
+
+Notes.md
+Prompt.md
