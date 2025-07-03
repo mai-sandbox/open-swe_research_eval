@@ -212,7 +212,7 @@ workflow.add_edge("summarize", END)
 # Setup memory with SQLite
 checkpointer = SqliteSaver.from_conn_string(":memory:")  # Use in-memory for demo, change to "research_memory.db" for persistence
 
-app = workflow.build(checkpointer=checkpointer)
+app = workflow.compile(checkpointer=checkpointer)
 
 def main():
     """Run the research assistant."""
@@ -283,4 +283,5 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Fatal error: {e}")
         print("Make sure you have set ANTHROPIC_API_KEY in your .env file")
+
 
