@@ -194,7 +194,7 @@ workflow.add_node("summarize", summarize_research)
 # Add edges
 workflow.add_edge(START, "agent")
 
-workflow.add_conditional_edge(
+workflow.add_conditional_edges(
     "agent",
     route_after_agent,
     {
@@ -283,3 +283,4 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Fatal error: {e}")
         print("Make sure you have set ANTHROPIC_API_KEY in your .env file")
+
