@@ -267,7 +267,7 @@ def main():
             if "interrupt" in str(e).lower():
                 print("\n⏸️  Sensitive topic detected. Requires human approval to proceed.")
                 while True:
-                    approval_input = input("Type 'approve' to continue or 'reject' to stop: ").lower()
+                    approval_input = safe_input("Type 'approve' to continue or 'reject' to stop: ", "reject").lower()
                     if approval_input == 'approve':
                         print("✅ Approval granted. Resuming research...")
                         # Resume with Command pattern
@@ -297,6 +297,7 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Fatal error: {e}")
         print("Make sure you have set ANTHROPIC_API_KEY in your .env file")
+
 
 
 
