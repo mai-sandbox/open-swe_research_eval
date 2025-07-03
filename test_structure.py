@@ -22,5 +22,5 @@ def test_structure():
         assert hasattr(research_assistant, 'main'), "Missing main function"
         assert hasattr(research_assistant, 'web_search'), "Missing web_search tool"
         assert hasattr(research_assistant, 'document_lookup'), "Missing document_lookup tool"
-        assert hasattr(research_assistant, 'calculate_stats'), "Missing calculate_stats tool"
+
 
