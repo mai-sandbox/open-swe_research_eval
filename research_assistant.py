@@ -222,10 +222,10 @@ def safe_input(prompt="", default="quit"):
     try:
         return input(prompt)
     except EOFError:
-        print(f"
+        print(f"EOF encountered, using default value: {default}")
         return default
     except KeyboardInterrupt:
-        print("
+        print("Interrupted by user, exiting...")
         return "quit"
 
 def main():
@@ -297,6 +297,7 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Fatal error: {e}")
         print("Make sure you have set ANTHROPIC_API_KEY in your .env file")
+
 
 
 
