@@ -210,7 +210,7 @@ workflow.add_edge("approval", "agent")
 workflow.add_edge("summarize", END)
 
 # Setup memory with SQLite
-checkpointer = SqliteSaver.from_conn_string(":memory:")  # Use in-memory for demo, change to "research_memory.db" for persistence
+checkpointer = MemorySaver()  # Use in-memory for demo
 
 app = workflow.compile(checkpointer=checkpointer)
 
@@ -283,6 +283,7 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Fatal error: {e}")
         print("Make sure you have set ANTHROPIC_API_KEY in your .env file")
+
 
 
 
