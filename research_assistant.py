@@ -214,6 +214,20 @@ checkpointer = MemorySaver()  # Use in-memory for demo
 
 app = workflow.compile(checkpointer=checkpointer)
 
+def safe_input(prompt="", default="quit"):
+    """
+    Safe input function that handles EOF conditions gracefully.
+    Returns the default value when EOF is encountered.
+    """
+    try:
+        return input(prompt)
+    except EOFError:
+        print(f"
+        return default
+    except KeyboardInterrupt:
+        print("
+        return "quit"
+
 def main():
     """Run the research assistant."""
     print("🔬 Advanced Research Assistant Started!")
@@ -283,6 +297,7 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Fatal error: {e}")
         print("Make sure you have set ANTHROPIC_API_KEY in your .env file")
+
 
 
 
