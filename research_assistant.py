@@ -3,7 +3,7 @@ Advanced Research Assistant using LangGraph with custom state, memory, and human
 """
 
 import os
-from typing import Annotated, TypedDict, List, Optional, Literal
+from typing import Annotated, List, Optional, Literal
 from dotenv import load_dotenv
 
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
@@ -13,7 +13,8 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.checkpoint.sqlite import SqliteSaver
-from langgraph.errors import NodeInterrupt
+from langgraph.types import Command, interrupt
+from typing_extensions import TypedDict
 
 load_dotenv()
 
@@ -22,13 +23,12 @@ class ResearchState(TypedDict):
     messages: Annotated[List[BaseMessage], add_messages]
     
     # Custom state fields for research tracking
-    research_query: str
-    research_progress: List[str]
-    sources_found: List[str]
-    requires_approval: bool
-    approved_by_human: bool
-    
-    summary: str
+    research_query: Optional[str]
+    research_progress: Optional[List[str]]
+    sources_found: Optional[List[str]]
+    requires_approval: Optional[bool]
+    approved_by_human: Optional[bool]
+    summary: Optional[str]
 
 # Research tools
 @tool
@@ -63,82 +63,138 @@ def calculate_stats(expression: str) -> str:
     """Perform calculations and statistical analysis."""
     try:
         # Simple calculator (in real implementation, would use proper math library)
-        result = eval(expression)  # Note: eval is used for simplicity, use with caution
-        return f"Calculation result: {result}"
+        result = eval(expression)  # Note: eval is unsafe in production
+        return f"Calculation result: {expression} = {result}"
     except Exception as e:
-        return f"Error in calculation: {e}"
+        return f"Error in calculation: {str(e)}"
 
 @tool
-def request_human_approval(reason: str) -> str:
-    """Request human approval for a sensitive research topic."""
-    return f"Human approval requested for the following reason: {reason}"
+def request_human_approval(topic: str) -> str:
+    """Request human approval for sensitive research topics."""
+    approval_data = interrupt({
+        "type": "approval_request",
+        "topic": topic,
+        "message": f"The topic '{topic}' requires human approval before proceeding with research."
+    })
+    return f"Human approval {'granted' if approval_data.get('approved') else 'denied'} for topic: {topic}"
 
-# System prompt for the research agent
-system_prompt = (
-    "You are an advanced research assistant. Your goal is to conduct thorough research on a given topic, "
-    "using the available tools to find, analyze, and summarize information. "
-    "When you encounter sensitive topics that might require human oversight (e.g., politics, ethics), "
-    "you must use the 'request_human_approval' tool to get permission before proceeding. "
-    "and provide a comprehensive summary of your findings. Track your progress and sources diligently."
-)
-
-# Model and tools setup
-llm = ChatAnthropic(model="claude-3-haiku-20240307")
+# Define tools list
 tools = [web_search, document_lookup, calculate_stats, request_human_approval]
-research_agent = llm.bind_tools(tools)
-execute_tools = ToolNode(tools)
 
-# Agent function
-def run_agent(state: ResearchState) -> dict:
-    """Run the research agent."""
-    messages = state["messages"]
-    system = SystemMessage(content=system_prompt)
-    response = research_agent.invoke([system] + messages)
-    return {"messages": [response]}
+# Initialize LLM with tools
+llm = ChatAnthropic(model="claude-3-haiku-20240307")
+llm_with_tools = llm.bind_tools(tools)
 
-# Approval node
-def request_approval(state: ResearchState) -> dict:
-    """Request human approval and wait for it."""
-    if not state.get("approved_by_human"):
-        raise NodeInterrupt()
-    return {}
+def run_agent(state: ResearchState):
+    """Run the research agent with current state."""
+    system_prompt = """You are an advanced research assistant. You can:
+    1. Search the web for information
+    2. Look up internal documents  
+    3. Perform calculations and analysis
+    4. Request human approval for sensitive topics
+    
+    Current research progress: {progress}
+    Sources found: {sources}
+    
+    Be thorough and helpful. For sensitive topics like politics, controversies, 
+    or personal information, use the request_human_approval tool first.
+    """
+    
+    # Add system message with context
+    messages = state["messages"].copy()
+    if not any(isinstance(msg, SystemMessage) for msg in messages):
+        progress = state.get("research_progress", [])
+        sources = state.get("sources_found", [])
+        system_msg = SystemMessage(content=system_prompt.format(
+            progress=progress, sources=sources
+        ))
+        messages.insert(0, system_msg)
+    
+    # Get response from LLM
+    response = llm_with_tools.invoke(messages)
+    
+    # Update state with response and research tracking
+    return {
+        "messages": [response],
+        "research_query": state.get("research_query") or "General research",
+        "research_progress": state.get("research_progress", []) + ["Agent response generated"],
+    }
 
-# Summarization function
-def summarize_research(state: ResearchState) -> dict:
-    """Summarize the research findings."""
-    summary = (
-        "Based on the research, here is a summary of the findings:\n"
-        f"Query: {state['research_query']}\n"
-        f"Progress: {' -> '.join(state['research_progress'])}\n"
-        f"Sources: {', '.join(state['sources_found'])}\n"
-    )
-    return {"summary": summary}
-
-# Routing function
-def route_after_agent(state: ResearchState) -> Literal["tools", "approval", "summarize", "end"]:
-    """Inspect the AI message for tool calls and route accordingly."""
+def route_after_agent(state: ResearchState) -> Literal["tools", "approval", "summarize"]:
+    """Route after agent based on the last message."""
     last_message = state["messages"][-1]
+    
+    # Handle case where no tool calls are made
+    if not hasattr(last_message, 'tool_calls') or not last_message.tool_calls:
+        # Check if we have enough research to summarize
+        progress = state.get("research_progress", [])
+        if len(progress) > 3:  # Arbitrary threshold for summarization
+            return "summarize"
+        else:
+            return "tools"  # Default to tools if no clear direction
+    
+    # Check if there are tool calls
     if last_message.tool_calls:
+        # Check if any tool call is for human approval
         for tool_call in last_message.tool_calls:
             if tool_call["name"] == "request_human_approval":
                 return "approval"
         return "tools"
-    else:
+    
+    # No tool calls, check if we should summarize
+    if last_message.content and ("summary" in last_message.content.lower() or "conclude" in last_message.content.lower()):
         return "summarize"
+    
+    return "tools"
 
-# Define the graph
+def request_approval(state: ResearchState):
+    """Handle human approval requests - this node processes the approval workflow."""
+    # The interrupt happens in the tool, this node just updates state
+    return {
+        "requires_approval": True,
+        "research_progress": state.get("research_progress", []) + ["Approval requested"]
+    }
+
+def summarize_research(state: ResearchState):
+    """Generate a final research summary."""
+    messages = state["messages"]
+    
+    # Create summary prompt
+    summary_prompt = f"""
+    Based on the research conversation above, provide a comprehensive summary including:
+    1. Main research query: {state.get('research_query', 'Not specified')}
+    2. Key findings from sources
+    3. Important data points or calculations
+    4. Conclusions and recommendations
+    
+    Research progress: {state.get('research_progress', [])}
+    Sources consulted: {state.get('sources_found', [])}
+    
+    Provide a well-structured summary.
+    """
+    
+    summary_message = HumanMessage(content=summary_prompt)
+    summary_response = llm.invoke(messages + [summary_message])
+    
+    return {
+        "messages": [summary_response], 
+        "summary": summary_response.content,
+        "research_progress": state.get("research_progress", []) + ["Research summarized"]
+    }
+
+# Create the workflow
 workflow = StateGraph(ResearchState)
 
 # Add nodes
 workflow.add_node("agent", run_agent)
-workflow.add_node("tools", execute_tools)
+workflow.add_node("tools", ToolNode(tools))
 workflow.add_node("approval", request_approval)
 workflow.add_node("summarize", summarize_research)
 
 # Add edges
 workflow.add_edge(START, "agent")
 
-workflow.add_conditional_edge(
+workflow.add_conditional_edges(
     "agent",
     route_after_agent,
     {
@@ -154,9 +210,9 @@ workflow.add_edge("approval", "agent")
 workflow.add_edge("summarize", END)
 
 # Setup memory with SQLite
-checkpointer = SqliteSaver.from_conn_string("research_memory.db")
+checkpointer = SqliteSaver.from_conn_string(":memory:")  # Use in-memory for demo, change to "research_memory.db" for persistence
 
-app = workflow.build(checkpointer=checkpointer)
+app = workflow.compile(checkpointer=checkpointer)
 
 def main():
     """Run the research assistant."""
@@ -173,32 +229,59 @@ def main():
             break
 
         user_message = HumanMessage(content=user_input)
-        initial_input = {"messages": [user_message]}
+        # Initialize state with all custom fields
+        initial_input = {
+            "messages": [user_message],
+            "research_query": user_input,
+            "research_progress": ["Research started"],
+            "sources_found": [],
+            "requires_approval": False,
+            "approved_by_human": False,
+            "summary": None
+        }
 
+        # Stream events and handle interrupts properly
+        events = app.stream(initial_input, config=thread_config, stream_mode="values")
+        
         try:
-            for event in app.stream(initial_input, config=thread_config):
-                for key, value in event.items():
-                    if key == "agent" and value["messages"]:
-                        last_message = value["messages"][-1]
-                        if last_message.content:
-                            print(f"Assistant: {last_message.content}")
-
-        except NodeInterrupt:
-            print("\n⏸️  Sensitive topic detected. Requires human approval to proceed.")
-            while True:
-                approval_input = input("Type 'approve' to continue or 'reject' to stop: ").lower()
-                if approval_input == 'approve':
-                    print("✅ Approval granted. Resuming research...")
-                    # Resume the graph from the point of interruption
-                    app.update_state(thread_config, {"approved_by_human": True})
-                    for event in app.stream(None, config=thread_config):
-                         for key, value in event.items():
-                            if key == "agent" and value["messages"] and value["messages"][-1].content:
-                                print(f"Assistant: {value['messages'][-1].content}")
-                    break 
-                elif approval_input == 'reject':
-                    print("❌ Research rejected. Please enter a new query.")
-                    break
+            for event in events:
+                if "messages" in event and event["messages"]:
+                    last_message = event["messages"][-1]
+                    if hasattr(last_message, 'content') and last_message.content:
+                        print(f"Assistant: {last_message.content}")
+        except Exception as e:
+            if "interrupt" in str(e).lower():
+                print("\n⏸️  Sensitive topic detected. Requires human approval to proceed.")
+                while True:
+                    approval_input = input("Type 'approve' to continue or 'reject' to stop: ").lower()
+                    if approval_input == 'approve':
+                        print("✅ Approval granted. Resuming research...")
+                        # Resume with Command pattern
+                        resume_command = Command(resume={"approved": True})
+                        try:
+                            for event in app.stream(resume_command, config=thread_config, stream_mode="values"):
+                                if "messages" in event and event["messages"]:
+                                    last_message = event["messages"][-1]
+                                    if hasattr(last_message, 'content') and last_message.content:
+                                        print(f"Assistant: {last_message.content}")
+                        except Exception as resume_error:
+                            print(f"Error during resume: {resume_error}")
+                        break
+                    elif approval_input == 'reject':
+                        print("❌ Research rejected. Please enter a new query.")
+                        break
+                    else:
+                        print("Please type 'approve' or 'reject'")
+            else:
+                print(f"Error occurred: {e}")
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n👋 Research assistant stopped.")
+    except Exception as e:
+        print(f"Fatal error: {e}")
+        print("Make sure you have set ANTHROPIC_API_KEY in your .env file")
+
+
