@@ -238,7 +238,7 @@ def main():
     thread_config = {"configurable": {"thread_id": "research-session-1"}}
     
     while True:
-        user_input = input("\nResearcher: ")
+        user_input = safe_input("\nResearcher: ", "quit")
         if user_input.lower() == 'quit':
             break
 
@@ -297,6 +297,7 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Fatal error: {e}")
         print("Make sure you have set ANTHROPIC_API_KEY in your .env file")
+
 
 
 
